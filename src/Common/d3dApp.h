@@ -11,6 +11,7 @@
 
 #include "d3dUtil.h"
 #include "GameTimer.h"
+#include "GBuffer.h"
 
 #include "../Common/imgui.h"
 #include "../Common/imgui_impl_win32.h"
@@ -126,6 +127,8 @@ protected:
 	UINT mRtvDescriptorSize = 0;
 	UINT mDsvDescriptorSize = 0;
 	UINT mCbvSrvUavDescriptorSize = 0;
+
+	std::unique_ptr<GBuffer> mGBuffer;
 
 	// Derived class should set these in derived constructor to customize starting values.
 	std::wstring mMainWndCaption = L"Counter-Strike: Global Offensive";
