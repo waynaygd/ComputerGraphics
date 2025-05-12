@@ -524,7 +524,7 @@ CreateCommandObjects();
 CreateSwapChain();
 CreateRtvAndDsvDescriptorHeaps();
 
-mGBuffer = std::make_unique<GBuffer>(md3dDevice.Get(), mClientWidth, mClientHeight);
+//mGBuffer = std::make_unique<GBuffer>(md3dDevice.Get(), mClientWidth, mClientHeight);
 
 return true;
 }
