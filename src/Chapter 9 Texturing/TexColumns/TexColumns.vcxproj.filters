@@ -132,8 +132,4 @@
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
-  <ItemGroup>
-    <Text Include="Shaders\Default.hlsl" />
-    <Text Include="Shaders\LightingUtil.hlsl" />
-  </ItemGroup>
 </Project>
