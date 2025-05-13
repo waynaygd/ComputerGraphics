@@ -4,6 +4,7 @@
 #include "../../Common/MathHelper.h"
 #include "../../Common/UploadBuffer.h"
 #include "../../Common/GeometryGenerator.h"
+#include "ShadowMap.h"
 
 #include "../../Common/imgui.h"
 #include "../../Common/imgui_impl_dx12.h"
@@ -36,6 +37,8 @@ float orbitAngle = radius;
 
 float camera_defaultposition[3] = { 0.f, 10.f, 25.f };
 float camera_defaultzoom[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+bool isRounding = 1;
 
 // GLOBAL PARAMS END
 
@@ -86,6 +89,7 @@ public:
     virtual bool Initialize()override;
 
 private:
+	virtual void CreateRtvAndDsvDescriptorHeaps()override;
     virtual void OnResize()override;
     virtual void Update(const GameTimer& gt)override;
     virtual void Draw(const GameTimer& gt)override;
@@ -98,7 +102,9 @@ private:
 	void AnimateMaterials(const GameTimer& gt);
 	void UpdateObjectCBs(const GameTimer& gt);
 	void UpdateMaterialCBs(const GameTimer& gt);
+	void UpdateShadowTransform(const GameTimer& gt);
 	void UpdateMainPassCB(const GameTimer& gt);
+	void UpdateShadowPassCB(const GameTimer& gt);
 	
 	void LoadAllTextures();
 	void LoadTexture(const std::string& name);
@@ -145,8 +151,29 @@ private:
 	// Render items divided by PSO.
 	std::vector<RenderItem*> mOpaqueRitems;
 
+	UINT mSkyTexHeapIndex = 0;
+	UINT mShadowMapHeapIndex = 0;
+
+	UINT mNullCubeSrvIndex = 0;
+	UINT mNullTexSrvIndex = 0;
+
+	CD3DX12_GPU_DESCRIPTOR_HANDLE mNullSrv;
+
     PassConstants mMainPassCB;
+	PassConstants mShadowPassCB;
+
 	Camera mCamera;
+
+	std::unique_ptr<ShadowMap> mShadowMap;
+
+	DirectX::BoundingSphere mSceneBounds;
+
+	float mLightNearZ = 0.0f;
+	float mLightFarZ = 0.0f;
+	XMFLOAT3 mLightPosW;
+	XMFLOAT4X4 mLightView = MathHelper::Identity4x4();
+	XMFLOAT4X4 mLightProj = MathHelper::Identity4x4();
+	XMFLOAT4X4 mShadowTransform = MathHelper::Identity4x4();
 
     float mTheta = 1.5f*XM_PI;
     float mPhi = 0.2f*XM_PI;
@@ -255,6 +282,27 @@ bool TexColumnsApp::Initialize()
 	return true;
 }
  
+void TexColumnsApp::CreateRtvAndDsvDescriptorHeaps()
+{
+	// Add +6 RTV for cube render target.
+	D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc;
+	rtvHeapDesc.NumDescriptors = SwapChainBufferCount;
+	rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+	rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	rtvHeapDesc.NodeMask = 0;
+	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(
+		&rtvHeapDesc, IID_PPV_ARGS(mRtvHeap.GetAddressOf())));
+
+	// Add +1 DSV for shadow map.
+	D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc;
+	dsvHeapDesc.NumDescriptors = 2;
+	dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+	dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	dsvHeapDesc.NodeMask = 0;
+	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(
+		&dsvHeapDesc, IID_PPV_ARGS(mDsvHeap.GetAddressOf())));
+}
+
 void TexColumnsApp::OnResize()
 {
 	D3DApp::OnResize();
@@ -563,6 +611,48 @@ void TexColumnsApp::UpdateMaterialCBs(const GameTimer& gt)
 	}
 }
 
+void TexColumnsApp::UpdateShadowTransform(const GameTimer& gt)
+{
+	/* нужно переписать под мой свет
+	// Only the first "main" light casts a shadow.
+	XMVECTOR lightDir = XMLoadFloat3(&mRotatedLightDirections[0]);
+	XMVECTOR lightPos = -2.0f * mSceneBounds.Radius * lightDir;
+	XMVECTOR targetPos = XMLoadFloat3(&mSceneBounds.Center);
+	XMVECTOR lightUp = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+	XMMATRIX lightView = XMMatrixLookAtLH(lightPos, targetPos, lightUp);
+
+	XMStoreFloat3(&mLightPosW, lightPos);
+
+	// Transform bounding sphere to light space.
+	XMFLOAT3 sphereCenterLS;
+	XMStoreFloat3(&sphereCenterLS, XMVector3TransformCoord(targetPos, lightView));
+
+	// Ortho frustum in light space encloses scene.
+	float l = sphereCenterLS.x - mSceneBounds.Radius;
+	float b = sphereCenterLS.y - mSceneBounds.Radius;
+	float n = sphereCenterLS.z - mSceneBounds.Radius;
+	float r = sphereCenterLS.x + mSceneBounds.Radius;
+	float t = sphereCenterLS.y + mSceneBounds.Radius;
+	float f = sphereCenterLS.z + mSceneBounds.Radius;
+
+	mLightNearZ = n;
+	mLightFarZ = f;
+	XMMATRIX lightProj = XMMatrixOrthographicOffCenterLH(l, r, b, t, n, f);
+
+	// Transform NDC space [-1,+1]^2 to texture space [0,1]^2
+	XMMATRIX T(
+		0.5f, 0.0f, 0.0f, 0.0f,
+		0.0f, -0.5f, 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f, 0.0f,
+		0.5f, 0.5f, 0.0f, 1.0f);
+
+	XMMATRIX S = lightView * lightProj * T;
+	XMStoreFloat4x4(&mLightView, lightView);
+	XMStoreFloat4x4(&mLightProj, lightProj);
+	XMStoreFloat4x4(&mShadowTransform, S);
+	*/
+}
+
 void TexColumnsApp::UpdateMainPassCB(const GameTimer& gt)
 {
 	auto currPassCB = mCurrFrameResource->PassCB.get();
@@ -659,14 +749,45 @@ void TexColumnsApp::UpdateMainPassCB(const GameTimer& gt)
 	mMainPassCB.Lights[8].Color = {0.0f, 1.0f, 0.5f, 1.0f};
 
 	for (int i = 3; i < 3 + lights_needed; i++) {
-		XMMATRIX rotation = XMMatrixRotationY(orbitAngle);
+		if (isRounding) {
+			XMMATRIX rotation = XMMatrixRotationY(orbitAngle);
 
-		XMVECTOR light_pos = XMLoadFloat3(&mMainPassCB.Lights[i].Position);
-		light_pos = XMVector3TransformNormal(light_pos, rotation);
-		XMStoreFloat3(&mMainPassCB.Lights[i].Position, light_pos);
+			XMVECTOR light_pos = XMLoadFloat3(&mMainPassCB.Lights[i].Position);
+			light_pos = XMVector3TransformNormal(light_pos, rotation);
+			XMStoreFloat3(&mMainPassCB.Lights[i].Position, light_pos);
+		}
 	}
 
 	currPassCB->CopyData(0, mMainPassCB);
+}
+
+void TexColumnsApp::UpdateShadowPassCB(const GameTimer& gt)
+{
+	XMMATRIX view = XMLoadFloat4x4(&mLightView);
+	XMMATRIX proj = XMLoadFloat4x4(&mLightProj);
+
+	XMMATRIX viewProj = XMMatrixMultiply(view, proj);
+	XMMATRIX invView = XMMatrixInverse(&XMMatrixDeterminant(view), view);
+	XMMATRIX invProj = XMMatrixInverse(&XMMatrixDeterminant(proj), proj);
+	XMMATRIX invViewProj = XMMatrixInverse(&XMMatrixDeterminant(viewProj), viewProj);
+
+	UINT w = mShadowMap->Width();
+	UINT h = mShadowMap->Height();
+
+	XMStoreFloat4x4(&mShadowPassCB.View, XMMatrixTranspose(view));
+	XMStoreFloat4x4(&mShadowPassCB.InvView, XMMatrixTranspose(invView));
+	XMStoreFloat4x4(&mShadowPassCB.Proj, XMMatrixTranspose(proj));
+	XMStoreFloat4x4(&mShadowPassCB.InvProj, XMMatrixTranspose(invProj));
+	XMStoreFloat4x4(&mShadowPassCB.ViewProj, XMMatrixTranspose(viewProj));
+	XMStoreFloat4x4(&mShadowPassCB.InvViewProj, XMMatrixTranspose(invViewProj));
+	mShadowPassCB.EyePosW = mLightPosW;
+	mShadowPassCB.RenderTargetSize = XMFLOAT2((float)w, (float)h);
+	mShadowPassCB.InvRenderTargetSize = XMFLOAT2(1.0f / w, 1.0f / h);
+	mShadowPassCB.NearZ = mLightNearZ;
+	mShadowPassCB.FarZ = mLightFarZ;
+
+	auto currPassCB = mCurrFrameResource->PassCB.get();
+	currPassCB->CopyData(1, mShadowPassCB);
 }
 
 void TexColumnsApp::LoadAllTextures()
