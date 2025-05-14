@@ -681,6 +681,7 @@ void TexColumnsApp::LoadAllTextures()
 			filepath = filepath.substr(0, filepath.size()-4);
 			filepath = "textures/" + filepath;
 			LoadTexture(filepath);
+			std::cout << "added texture " << filepath << std::endl << mTextures.size() << std::endl;
 		}
 	}
 }
