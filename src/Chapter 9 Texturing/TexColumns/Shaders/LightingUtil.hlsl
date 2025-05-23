@@ -14,7 +14,6 @@ struct Light
     float FalloffEnd; // point/spot light only
     float3 Position; // point light only
     float SpotPower; // spot light only
-    float4 Color;
 };
 
 struct Material
@@ -42,7 +41,7 @@ float3 SchlickFresnel(float3 R0, float3 normal, float3 lightVec)
     return reflectPercent;
 }
 
-float3 BlinnPhong(float3 lightStrength, float4 Color, float3 lightVec, float3 normal, float3 toEye, Material mat)
+float3 BlinnPhong(float3 lightStrength, float3 lightVec, float3 normal, float3 toEye, Material mat)
 {
     const float m = mat.Shininess * 256.0f;
     float3 halfVec = normalize(toEye + lightVec);
@@ -56,7 +55,7 @@ float3 BlinnPhong(float3 lightStrength, float4 Color, float3 lightVec, float3 no
     // doing LDR rendering.  So scale it down a bit.
     specAlbedo = specAlbedo / (specAlbedo + 1.0f);
 
-    return (mat.DiffuseAlbedo.rgb + specAlbedo) * lightStrength * Color;
+    return (mat.DiffuseAlbedo.rgb + specAlbedo) * lightStrength;
 }
 
 //---------------------------------------------------------------------------------------
@@ -71,7 +70,7 @@ float3 ComputeDirectionalLight(Light L, Material mat, float3 normal, float3 toEy
     float ndotl = max(dot(lightVec, normal), 0.0f);
     float3 lightStrength = L.Strength * ndotl;
 
-    return BlinnPhong(lightStrength, L.Color, lightVec, normal, toEye, mat);
+    return BlinnPhong(lightStrength, lightVec, normal, toEye, mat);
 }
 
 //---------------------------------------------------------------------------------------
@@ -100,7 +99,7 @@ float3 ComputePointLight(Light L, Material mat, float3 pos, float3 normal, float
     float att = CalcAttenuation(d, L.FalloffStart, L.FalloffEnd);
     lightStrength *= att;
 
-    return BlinnPhong(lightStrength, L.Color, lightVec, normal, toEye, mat);
+    return BlinnPhong(lightStrength, lightVec, normal, toEye, mat);
 }
 
 //---------------------------------------------------------------------------------------
@@ -109,7 +108,6 @@ float3 ComputePointLight(Light L, Material mat, float3 pos, float3 normal, float
 float3 ComputeSpotLight(Light L, Material mat, float3 pos, float3 normal, float3 toEye)
 {
     // The vector from the surface to the light.
-    
     float3 lightVec = L.Position - pos;
 
     // The distance from surface to light.
@@ -134,7 +132,7 @@ float3 ComputeSpotLight(Light L, Material mat, float3 pos, float3 normal, float3
     float spotFactor = pow(max(dot(-lightVec, L.Direction), 0.0f), L.SpotPower);
     lightStrength *= spotFactor;
 
-    return BlinnPhong(lightStrength, L.Color, lightVec, normal, toEye, mat);
+    return BlinnPhong(lightStrength, lightVec, normal, toEye, mat);
 }
 
 float4 ComputeLighting(Light gLights[MaxLights], Material mat,
@@ -168,5 +166,3 @@ float4 ComputeLighting(Light gLights[MaxLights], Material mat,
 
     return float4(result, 0.0f);
 }
-
-
